@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+
+log_raf_db/
+datas/
+*.jpg
+*.png
+
+
+*.pth
+checkpoints/
