@@ -93,3 +93,29 @@ class CoordAtt(nn.Module):
         y = x_w * x_h
  
         return y
+
+class ClassifierHead(nn.Module):
+    def __init__(self, num_class=7):
+        super(ClassifierHead, self).__init__()
+        self.Linear = Linear_block(512, 512, groups=512, kernel=(7, 7), stride=(1, 1), padding=(0, 0))
+        self.flatten = Flatten()
+        self.fc = nn.Linear(512, num_class)
+        self.bn = nn.BatchNorm1d(num_class)
+
+    def forward(self, x, shortcut):
+        multi_cross_attention = []
+        for i in range(self.num_head):
+            multi_cross_attention.append(getattr(self, "cat_head%d" % i)(x))
+
+        y = multi_cross_attention[0]
+
+        for i in range(1, self.num_head):
+            y = torch.max(y, multi_cross_attention[i])
+        attention_map = y
+
+        # classifier head
+        y = shortcut * y
+        y = self.Linear(y)
+        y = self.flatten(y)
+        y = self.fc(y)
+        return y, attention_map
