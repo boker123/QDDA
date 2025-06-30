@@ -4,6 +4,9 @@ from torch.nn import functional as F
 from timm.models.layers import trunc_normal_, DropPath
 from thop import profile
 
+from utils.AttentionFunc import Attn_QCS_SD
+
+
 class CrossAttention(nn.Module):
 
     def __init__(self, embed_dim=768):
@@ -18,6 +21,7 @@ class CrossAttention(nn.Module):
         self.theta = nn.Parameter(torch.tensor(0.), requires_grad=True)
 
     def forward(self, x_a, x_p, x_n, x_n2):
+        print(f'x_a.shape: {x_a.shape}')
         B, N, C = x_a.shape
 
         x_a = self.norm1(x_a)

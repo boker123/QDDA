@@ -77,6 +77,7 @@ class CoordAtt(nn.Module):
         x_h = self.Linear_h(x)
         x_w = self.Linear_w(x)
         x_w = x_w.permute(0, 1, 3, 2)
+        print(f'x_h: {x_h.shape}, x_w: {x_w.shape}')
 
         y = torch.cat([x_h, x_w], dim=2)
         y = self.conv1(y)
@@ -91,18 +92,21 @@ class CoordAtt(nn.Module):
         x_w = x_w.expand(-1, -1, h, w)
         
         y = x_w * x_h
- 
+        print(f'y: {y.shape}')
         return y
 
 class ClassifierHead(nn.Module):
-    def __init__(self, num_class=7):
+    def __init__(self, num_class=7, num_head=2):
         super(ClassifierHead, self).__init__()
         self.Linear = Linear_block(512, 512, groups=512, kernel=(7, 7), stride=(1, 1), padding=(0, 0))
+        self.num_head = num_head
+        for i in range(int(num_head)):
+            setattr(self, "cat_head%d" % (i), CoordAttHead())
         self.flatten = Flatten()
         self.fc = nn.Linear(512, num_class)
         self.bn = nn.BatchNorm1d(num_class)
 
-    def forward(self, x, shortcut):
+    def forward(self, x):
         multi_cross_attention = []
         for i in range(self.num_head):
             multi_cross_attention.append(getattr(self, "cat_head%d" % i)(x))
@@ -112,10 +116,11 @@ class ClassifierHead(nn.Module):
         for i in range(1, self.num_head):
             y = torch.max(y, multi_cross_attention[i])
         attention_map = y
+        print(f'attention map: {attention_map.shape}')
 
         # classifier head
-        y = shortcut * y
+        y = x * y
         y = self.Linear(y)
         y = self.flatten(y)
         y = self.fc(y)
-        return y, attention_map
+        return y, attention_map, multi_cross_attention
