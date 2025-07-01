@@ -1,11 +1,8 @@
 import torch
-import torch.nn as nn
-from torch.nn import functional as F
-from timm.models.layers import trunc_normal_, DropPath
-from torch.serialization import add_safe_globals
 from thop import profile
 import os
 import traceback
+from torchinfo import summary
 
 
 from models.QDDA import QDDANet
@@ -27,6 +24,18 @@ def print_model_info(model, input_size=(1, 3, 224, 224)):
     print("\n1. 模型结构:")
     print("-" * 50)
     print(model)
+
+    print("\n1.1 模型摘要信息 (summary):")
+    print("-" * 50)
+    try:
+        summary(model, input_data=[
+            torch.randn(input_size),
+            torch.randn(input_size),
+            torch.randn(input_size),
+            torch.randn(input_size)
+        ], col_names=["input_size", "output_size", "num_params", "params_percent", "kernel_size"], depth=3)
+    except Exception as e:
+        print(f"summary 打印失败: {e}")
 
     # 2. 打印模型参数数量
     print("\n2. 模型参数统计:")
@@ -128,7 +137,7 @@ def test_model_forward(model, input_size=(2, 3, 224, 224)):
 
             print(f"\n输出尺寸:")
             for i, output in enumerate(outputs):
-                print(f"  output_{i}: {output.shape}")
+                print(f"  output_{i}: {output}")
 
             print(f"\n前向传播成功！")
 

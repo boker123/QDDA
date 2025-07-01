@@ -115,7 +115,7 @@ class QDDANet(nn.Module):
         # Tensor.shape(b, 7, 7, 512)
         cls_base_anchor, x_at_anchor, x_an_head = self.cls_head(x_anchor)
         if x_positive is None:
-            print(cls_base_anchor.shape)
+            # print(cls_base_anchor.shape)
             return cls_base_anchor, x_an_head
         '''--------------------------------------------------------------------'''
 

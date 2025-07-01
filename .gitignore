@@ -2,7 +2,7 @@ __pycache__/
 *.py[cod]
 
 log_raf_db/
-datas/
+datas/RAF-DB/basic
 *.jpg
 *.png
 
