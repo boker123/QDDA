@@ -21,7 +21,7 @@ class CrossAttention(nn.Module):
         self.theta = nn.Parameter(torch.tensor(0.), requires_grad=True)
 
     def forward(self, x_a, x_p, x_n, x_n2):
-        print(f'x_a.shape: {x_a.shape}')
+        # print(f'x_a.shape: {x_a.shape}')
         B, N, C = x_a.shape
 
         x_a = self.norm1(x_a)

@@ -111,11 +111,12 @@ class QDDANet(nn.Module):
 
         '''--------------------------anchor------------------------------------'''
         x_anchor = self.backbone(x_anchor)  # using MNF to extract features.
-        print(f'x_anchor {x_anchor.shape}')
+        # print(f'x_anchor {x_anchor.shape}')
         # Tensor.shape(b, 7, 7, 512)
         cls_base_anchor, x_at_anchor, x_an_head = self.cls_head(x_anchor)
         if x_positive is None:
-            return x_at_anchor, x_an_head
+            print(cls_base_anchor.shape)
+            return cls_base_anchor, x_an_head
         '''--------------------------------------------------------------------'''
 
         '''---------------------------positive-----------------------------------'''
@@ -142,8 +143,8 @@ class QDDANet(nn.Module):
         x_csa_anchor, x_csa_positive, x_csa_negative, x_csa_negative2, _ = self.cross_similarity_attention(x_at_anchor,
                                                                                     x_at_positive, x_at_negative, x_at_negative2)
 
-        print(f'x_csa_anchor {x_csa_anchor.shape}')
-        print(f'x_at_positive {x_at_positive.shape}')
+        # print(f'x_csa_anchor {x_csa_anchor.shape}')
+        # print(f'x_at_positive {x_at_positive.shape}')
         x_at_anchor = x_at_anchor + x_csa_anchor
         x_at_positive = x_at_positive + x_csa_positive
         x_at_negative = x_at_negative + x_csa_negative
@@ -154,7 +155,7 @@ class QDDANet(nn.Module):
         x_at_negative = self.inverse_embedding(x_at_negative)
         x_at_negative2 = self.inverse_embedding(x_at_negative2)
 
-        print(f'x_at_anchor {x_at_anchor.shape}')
+        # print(f'x_at_anchor {x_at_anchor.shape}')
         x_at_anchor,_, x_at_an_head = self.cls_head(x_at_anchor)
         x_at_positive,_, x_at_po_head = self.cls_head(x_at_positive)
         x_at_negative,_, x_at_ne_head = self.cls_head(x_at_negative)

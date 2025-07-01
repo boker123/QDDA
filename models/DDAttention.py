@@ -77,7 +77,7 @@ class CoordAtt(nn.Module):
         x_h = self.Linear_h(x)
         x_w = self.Linear_w(x)
         x_w = x_w.permute(0, 1, 3, 2)
-        print(f'x_h: {x_h.shape}, x_w: {x_w.shape}')
+        # print(f'x_h: {x_h.shape}, x_w: {x_w.shape}')
 
         y = torch.cat([x_h, x_w], dim=2)
         y = self.conv1(y)
@@ -92,7 +92,7 @@ class CoordAtt(nn.Module):
         x_w = x_w.expand(-1, -1, h, w)
         
         y = x_w * x_h
-        print(f'y: {y.shape}')
+        # print(f'y: {y.shape}')
         return y
 
 class ClassifierHead(nn.Module):
@@ -116,7 +116,7 @@ class ClassifierHead(nn.Module):
         for i in range(1, self.num_head):
             y = torch.max(y, multi_cross_attention[i])
         attention_map = y
-        print(f'attention map: {attention_map.shape}')
+        # print(f'attention map: {attention_map.shape}')
 
         # classifier head
         y = x * y

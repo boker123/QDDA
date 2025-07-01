@@ -106,33 +106,33 @@ def main():
 
     train_root, test_root, train_pd, test_pd, cls_num = config(dataset=args.dataset)
 
-    # data_transforms = {
-    #     'train': transforms.Compose([transforms.Resize((224, 224)),
-    #                                  transforms.RandomHorizontalFlip(),
-    #                                  transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-    #                                  transforms.ToTensor(),
-    #                                  transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    #                                  transforms.RandomErasing(scale=(0.02, 0.1))]),
-    #     'test': transforms.Compose([transforms.Resize((224, 224)),
-    #                                 transforms.ToTensor(),
-    #                                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), ]),
-    # }
-
     data_transforms = {
-        'train': transforms.Compose([transforms.Resize((232, 232)),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(8),
-            transforms.RandomCrop((224, 224)),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            transforms.RandomErasing(scale=(0.02, 0.1))]),
-
-        'test': transforms.Compose([transforms.Resize((232, 232)),
-            transforms.CenterCrop((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]),
+        'train': transforms.Compose([transforms.Resize((112, 112)),
+                                     transforms.RandomHorizontalFlip(),
+                                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+                                     transforms.ToTensor(),
+                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                     transforms.RandomErasing(scale=(0.02, 0.1))]),
+        'test': transforms.Compose([transforms.Resize((112, 112)),
+                                    transforms.ToTensor(),
+                                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), ]),
     }
+
+    # data_transforms = {
+    #     'train': transforms.Compose([transforms.Resize((112, 112)),
+    #         transforms.RandomHorizontalFlip(),
+    #         transforms.RandomRotation(8),
+    #         transforms.RandomCrop((112, 112)),
+    #         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    #         transforms.RandomErasing(scale=(0.02, 0.1))]),
+    #
+    #     'test': transforms.Compose([transforms.Resize((112, 112)),
+    #         transforms.CenterCrop((112, 112)),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]),
+    # }
 
 
     train_dataset = Dataset(train_root, train_pd, train=True, transform=data_transforms['train'], num_positive=1,
@@ -432,6 +432,8 @@ def accuracy(output, target, topk=(1,)):
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
+        # print("预测:", pred[:10])
+        # print("标签:", target[:10])
         res = []
         for k in topk:
             correct_k = correct[:k].contiguous().view(-1).float().sum(0, keepdim=True)
