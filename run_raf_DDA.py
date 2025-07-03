@@ -1,4 +1,53 @@
 import warnings
+
+from models.QDDA import DDAMFN
+
+warnings.filterwarnings("ignore")
+import argparse
+import torch.nn.parallel
+import torch.optim
+import torch.utils.data
+import torch.utils.data.distributed
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use('Agg')
+import datetime
+
+warnings.filterwarnings("ignore", category=UserWarning)
+
+now = datetime.datetime.now()
+time_str = now.strftime("[%m-%d]-[%H-%M]-")
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--dataset', default='RAF-DB', choices=['RAF-DB', 'AffectNet-7', 'FERPlus', 'AffectNet-8'],
+                    type=str, help='dataset option')
+parser.add_argument('--checkpoint_path', type=str, default='./checkpoint_raf_db/')
+parser.add_argument('--best_checkpoint_path', type=str, default='./checkpoint_raf_db/')
+parser.add_argument('-j', '--workers', default=4, type=int, metavar='N', help='number of data loading workers')
+parser.add_argument('--epochs', default=40, type=int, metavar='N', help='number of total epochs to run')
+parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
+parser.add_argument('-b', '--batch-size', default=16, type=int, metavar='N')
+parser.add_argument('--optimizer', type=str, default="adam", help='Optimizer, adam or sgd.')
+
+parser.add_argument('--lr', '--learning-rate', default=0.000003, type=float, metavar='LR', dest='lr')
+parser.add_argument('--momentum', default=0.9, type=float, metavar='M')
+parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float, metavar='W', dest='weight_decay')
+parser.add_argument('-p', '--print-freq', default=100, type=int, metavar='N', help='print frequency')
+parser.add_argument('--resume', default=None, type=str, metavar='PATH', help='path to checkpoint')
+parser.add_argument('-e', '--evaluate', default=None, type=str, help='evaluate model on test set')
+parser.add_argument('--beta', type=float, default=0.6)
+parser.add_argument('--gpu', type=str, default='1')
+parser.add_argument('--num_classes', type=int, default=7)
+
+args = parser.parse_args()
+args.checkpoint_path = args.checkpoint_path + time_str + 'checkout.pth'
+args.checkpoint_path = Path(args.checkpoint_path)
+args.best_checkpoint_path = args.best_checkpoint_path + time_str + 'model_best.pth'
+args.best_checkpoint_path = Path(args.best_checkpoint_path)
+
+import warnings
 from sklearn import metrics
 
 from models.QDDA import QDDANet
@@ -42,7 +91,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='man
 parser.add_argument('-b', '--batch-size', default=16, type=int, metavar='N')
 parser.add_argument('--optimizer', type=str, default="adam", help='Optimizer, adam or sgd.')
 
-parser.add_argument('--lr', '--learning-rate', default=0.000003, type=float, metavar='LR', dest='lr')
+parser.add_argument('--lr', '--learning-rate', default=0.0005, type=float, metavar='LR', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M')
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float, metavar='W', dest='weight_decay')
 parser.add_argument('-p', '--print-freq', default=100, type=int, metavar='N', help='print frequency')
@@ -65,13 +114,12 @@ def main():
     print('Training time: ' + now.strftime("%m-%d %H:%M"))
 
     # create model
-    model = QDDANet(num_class=args.num_classes, num_head=2, embed_dim=786,pretrained=True)
+    model = DDAMFN(num_class=args.num_classes, num_head=2, embed_dim=786,pretrained=True)
 
     model = torch.nn.DataParallel(model).cuda()
 
     criterion_cls = torch.nn.CrossEntropyLoss()
     criterion_at = AttentionLoss()
-    triplet_loss_fn = torch.nn.TripletMarginLoss(margin=1.0, p=2)
 
     if args.optimizer == 'adamw':
         base_optimizer = torch.optim.AdamW
@@ -110,7 +158,11 @@ def main():
     data_transforms = {
         'train': transforms.Compose([transforms.Resize((112, 112)),
                                      transforms.RandomHorizontalFlip(),
-                                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+                                     transforms.RandomApply([
+                                         transforms.RandomRotation(5),
+                                         transforms.RandomCrop(112, padding=8)
+                                         #          ], p=0.2),
+                                     ], p=0.5),
                                      transforms.ToTensor(),
                                      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                                      transforms.RandomErasing(scale=(0.02, 0.1))]),
@@ -172,7 +224,7 @@ def main():
             f.write('Current learning rate: ' + str(current_learning_rate) + '\n')
 
         # train for one epoch
-        train_los_1, train_los_2, train_los_3, train_los_4 = train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,optimizer, epoch,
+        train_los_1, train_los_2, train_los_3, train_los_4 = train(train_loader, model, criterion_cls, criterion_at, optimizer, epoch,
                                                                    args)
 
         # evaluate on a validation set
@@ -213,7 +265,7 @@ def main():
                          'recorder': recorder}, is_best, args)
 
 
-def train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,optimizer, epoch, args):
+def train(train_loader, model, criterion_cls, criterion_at, optimizer, epoch, args):
     losses = AverageMeter('Loss', ':.5f')
     top1 = AverageMeter('Accuracy', ':6.3f')
     losses_1 = AverageMeter('Loss_1', ':.5f')
@@ -241,27 +293,20 @@ def train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,opti
 
         '''----------------------  first_step  ----------------------'''
         # compute output
-        (output1, output2, output3, output4, output5, output6, output7, output8,
-         output9, output10, output11, output12, output13, output14, output15, output16)  = model(anchor_image,
-                                                                                                 positive_image, negative_image, negative_image2)
-        loss1 = criterion_cls(output1, label)
-        loss2 = criterion_cls(output2, label)
-        loss3 = criterion_cls(output3, neg_label)
-        loss4 = criterion_cls(output4, neg_label)
-        loss5 = criterion_cls(output5, label)
-        loss6 = criterion_cls(output6, label)
-        loss7 = criterion_cls(output7, neg_label)
-        loss8 = criterion_cls(output8, neg_label)
-        loss_fn1 = triplet_loss_fn(output13, output14, output15)
-        loss_fn2 = triplet_loss_fn(output13, output14, output16)
-        loss_triplet = (loss_fn1 + loss_fn2) / 2
-        loss_csa = (loss5 + loss6 + loss7 + loss8) / 4
-        loss_dda = (criterion_at(output9) + criterion_at(output10) + criterion_at(output11) + criterion_at(output12))/4
+        output, head = model(anchor_image)
+        loss1 = criterion_cls(output, label)  + 0.1 * criterion_at(head)
+        # loss2 = criterion_cls(output2, label) + 0.1 * criterion_at(output10)
+        # loss3 = criterion_cls(output3, neg_label) + 0.1 * criterion_at(output11)
+        # loss4 = criterion_cls(output4, neg_label) + 0.1 * criterion_at(output12)
+        # loss5 = criterion_cls(output5, label) + 0.1 * criterion_at(output13)
+        # loss6 = criterion_cls(output6, label) + 0.1 * criterion_at(output14)
+        # loss7 = criterion_cls(output7, neg_label) + 0.1 * criterion_at(output15)
+        # loss8 = criterion_cls(output8, neg_label) + 0.1 * criterion_at(output16)
 
-        loss = loss1  #+ 0.1 * loss_dda + 0.1 * loss_csa + 0.1 * loss_triplet
+        loss = loss1
 
         # measure accuracy and record loss
-        acc1, _ = accuracy(output1, label, topk=(1, 5))
+        acc1, _ = accuracy(output, label, topk=(1, 5))
         losses.update(loss.item(), anchor_image.size(0))
         top1.update(acc1[0], anchor_image.size(0))
 
@@ -277,38 +322,29 @@ def train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,opti
 
         '''----------------------  second_step  ----------------------'''
 
-        (output1, output2, output3, output4, output5, output6, output7, output8,
-         output9, output10, output11, output12, output13, output14, output15, output16) = model(anchor_image,
-                                                                                                positive_image,
-                                                                                                negative_image,
-                                                                                                negative_image2)
+        output, head = model(anchor_image)
+        loss1 = criterion_cls(output, label) + 0.1 * criterion_at(head)
 
-        loss1 = criterion_cls(output1, label)
-        loss2 = criterion_cls(output2, label)
-        loss3 = criterion_cls(output3, neg_label)
-        loss4 = criterion_cls(output4, neg_label)
-        loss5 = criterion_cls(output5, label)
-        loss6 = criterion_cls(output6, label)
-        loss7 = criterion_cls(output7, neg_label)
-        loss8 = criterion_cls(output8, neg_label)
-        loss_fn1 = triplet_loss_fn(output13, output14, output15)
-        loss_fn2 = triplet_loss_fn(output13, output14, output16)
-        loss_triplet = (loss_fn1 + loss_fn2) / 2
-        loss_csa = (loss5 + loss6 + loss7 + loss8) / 4
-        loss_dda = (criterion_at(output9) + criterion_at(output10) + criterion_at(output11) + criterion_at(
-            output12)) / 4
+        # loss1 = criterion_cls(output1, label) + 0.1 * criterion_at(output9)
+        # loss2 = criterion_cls(output2, label) + 0.1 * criterion_at(output10)
+        # loss3 = criterion_cls(output3, neg_label) + 0.1 * criterion_at(output11)
+        # loss4 = criterion_cls(output4, neg_label) + 0.1 * criterion_at(output12)
+        # loss5 = criterion_cls(output5, label) + 0.1 * criterion_at(output13)
+        # loss6 = criterion_cls(output6, label) + 0.1 * criterion_at(output14)
+        # loss7 = criterion_cls(output7, neg_label) + 0.1 * criterion_at(output15)
+        # loss8 = criterion_cls(output8, neg_label) + 0.1 * criterion_at(output16)
 
-        loss = loss1  #+ 0.1 * loss_dda + 0.1 * loss_csa + 0.1 * loss_triplet
+        loss = loss1
 
         # measure accuracy and record loss
-        acc1, _ = accuracy(output1, label, topk=(1, 5))
+        acc1, _ = accuracy(output, label, topk=(1, 5))
         losses.update(loss.item(), anchor_image.size(0))
         top1.update(acc1[0], anchor_image.size(0))
         '----------loss-----------'
         losses_1.update(loss1.item(), anchor_image.size(0))
-        losses_2.update(loss2.item(), anchor_image.size(0))
-        losses_3.update(loss5.item(), anchor_image.size(0))
-        losses_4.update(loss6.item(), anchor_image.size(0))
+        # losses_2.update(loss2.item(), anchor_image.size(0))
+        # losses_3.update(loss5.item(), anchor_image.size(0))
+        # losses_4.update(loss6.item(), anchor_image.size(0))
 
         # compute gradient and do SGD step
         # optimizer.zero_grad()
@@ -343,7 +379,7 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
         for i, (images, target) in enumerate(val_loader):
             images = images.cuda()
             target = target.cuda()
-            output, head = model(images, None, None, None)
+            output, head = model(images)
             loss = criterion_cls(output, target) + 0.1 * criterion_at(head)
 
             # measure accuracy and record loss
