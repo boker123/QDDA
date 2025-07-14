@@ -9,11 +9,11 @@ from pathlib import Path
 BASEPATH = Path(__file__).resolve().parent.parent
 def config(dataset):
     if dataset == 'RAF-DB':
-        train_root = f'{BASEPATH}\datas\RAF-DB\\basic'
-        test_root = f'{BASEPATH}\datas\RAF-DB\\basic'
-        train_pd = pd.read_csv(f"{BASEPATH}\datas\RAF-DB\\raf_db_basic_train.txt", sep=" ", header=None,
+        train_root = f'{BASEPATH}/datas/RAF-DB/basic'
+        test_root = f'{BASEPATH}/datas/RAF-DB/basic'
+        train_pd = pd.read_csv(f"{BASEPATH}/datas/RAF-DB/raf_db_basic_train.txt", sep=" ", header=None,
                                names=['ImageName', 'label'])
-        test_pd = pd.read_csv(f"{BASEPATH}\datas\RAF-DB\\raf_db_basic_train.txt", sep=" ", header=None,
+        test_pd = pd.read_csv(f"{BASEPATH}/datas/RAF-DB/raf_db_basic_train.txt", sep=" ", header=None,
                               names=['ImageName', 'label'])
         cls_num = 7
 
