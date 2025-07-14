@@ -134,37 +134,8 @@ class QDDANet(nn.Module):
         cls_negative2, x_at_negative2, x_ne2_head = self.cls_head(x_negative2)
         '''----------------------------------------------------------------------'''
 
-        #embeded attention map
-        x_at_anchor = self.embedding(x_at_anchor)
-        x_at_positive = self.embedding(x_at_positive)
-        x_at_negative = self.embedding(x_at_negative)
-        x_at_negative2 = self.embedding(x_at_negative2)
-
-        x_csa_anchor, x_csa_positive, x_csa_negative, x_csa_negative2, _ = self.cross_similarity_attention(x_at_anchor,
-                                                                                    x_at_positive, x_at_negative, x_at_negative2)
-
-        # print(f'x_csa_anchor {x_csa_anchor.shape}')
-        # print(f'x_at_positive {x_at_positive.shape}')
-        x_at_anchor = x_at_anchor + x_csa_anchor
-        x_at_positive = x_at_positive + x_csa_positive
-        x_at_negative = x_at_negative + x_csa_negative
-        x_at_negative2 = x_at_negative2 + x_csa_negative2
-
-        x_at_anchor = self.inverse_embedding(x_at_anchor)
-        x_at_positive = self.inverse_embedding(x_at_positive)
-        x_at_negative = self.inverse_embedding(x_at_negative)
-        x_at_negative2 = self.inverse_embedding(x_at_negative2)
-
-        # print(f'x_at_anchor {x_at_anchor.shape}')
-        x_at_anchor,x_at_fm, _ = self.cls_head(x_at_anchor)
-        x_at_positive,x_po_fm, _ = self.cls_head(x_at_positive)
-        x_at_negative,x_ne_fm, _ = self.cls_head(x_at_negative)
-        x_at_negative2,x_ne2_fm, _  = self.cls_head(x_at_negative2)
-
         return (cls_base_anchor, cls_positive, cls_negative, cls_negative2,
-                x_at_anchor, x_at_positive, x_at_negative, x_at_negative2,
-                x_an_head, x_po_head, x_ne_head, x_ne2_head,
-                x_at_fm, x_po_fm, x_ne_fm, x_ne2_fm)
+                x_at_anchor, x_at_positive, x_at_negative,x_at_negative2)
 
 
 class DDAMFN(nn.Module):

@@ -42,7 +42,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='man
 parser.add_argument('-b', '--batch-size', default=16, type=int, metavar='N')
 parser.add_argument('--optimizer', type=str, default="adam", help='Optimizer, adam or sgd.')
 
-parser.add_argument('--lr', '--learning-rate', default=0.000003, type=float, metavar='LR', dest='lr')
+parser.add_argument('--lr', '--learning-rate', default=0.0005, type=float, metavar='LR', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M')
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float, metavar='W', dest='weight_decay')
 parser.add_argument('-p', '--print-freq', default=100, type=int, metavar='N', help='print frequency')
@@ -172,8 +172,7 @@ def main():
             f.write('Current learning rate: ' + str(current_learning_rate) + '\n')
 
         # train for one epoch
-        train_los_1, train_los_2, train_los_3, train_los_4 = train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,optimizer, epoch,
-                                                                   args)
+        train_los_1, train_los_2, train_los_3, train_los_4 = train(train_loader, model, criterion_cls,optimizer, epoch, args)
 
         # evaluate on a validation set
         val_acc, val_los, output, target, D = validate(val_loader, model, criterion_cls, criterion_at, args)
@@ -212,14 +211,24 @@ def main():
                          'recorder_m': recorder_m,
                          'recorder': recorder}, is_best, args)
 
+def qcs_loss(anchor_feat, positive_feat, negative1_feat, negative2_feat, margin=0.2):
+    cos = torch.nn.CosineSimilarity(dim=-1)
+    pos_sim = cos(anchor_feat, positive_feat)
+    neg_sim1 = cos(anchor_feat, negative1_feat)
+    neg_sim2 = cos(anchor_feat, negative2_feat)
 
-def train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,optimizer, epoch, args):
+    loss1 = F.relu(neg_sim1 - pos_sim + margin)
+    loss2 = F.relu(neg_sim2 - pos_sim + margin)
+    return (loss1 + loss2).mean()
+
+def train(train_loader, model, criterion_cls,optimizer, epoch, args):
     losses = AverageMeter('Loss', ':.5f')
     top1 = AverageMeter('Accuracy', ':6.3f')
     losses_1 = AverageMeter('Loss_1', ':.5f')
     losses_2 = AverageMeter('Loss_2', ':.5f')
     losses_3 = AverageMeter('Loss_3', ':.5f')
     losses_4 = AverageMeter('Loss_4', ':.5f')
+    half_epoch = int(epoch / 2)
 
     progress = ProgressMeter(len(train_loader),
                              [losses, top1, losses_1, losses_2, losses_3, losses_4],
@@ -241,27 +250,28 @@ def train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,opti
 
         '''----------------------  first_step  ----------------------'''
         # compute output
-        (output1, output2, output3, output4, output5, output6, output7, output8,
-         output9, output10, output11, output12, output13, output14, output15, output16)  = model(anchor_image,
-                                                                                                 positive_image, negative_image, negative_image2)
-        loss1 = criterion_cls(output1, label)
-        loss2 = criterion_cls(output2, label)
-        loss3 = criterion_cls(output3, neg_label)
-        loss4 = criterion_cls(output4, neg_label)
-        loss5 = criterion_cls(output5, label)
-        loss6 = criterion_cls(output6, label)
-        loss7 = criterion_cls(output7, neg_label)
-        loss8 = criterion_cls(output8, neg_label)
-        loss_fn1 = triplet_loss_fn(output13, output14, output15)
-        loss_fn2 = triplet_loss_fn(output13, output14, output16)
-        loss_triplet = (loss_fn1 + loss_fn2) / 2
-        loss_csa = (loss5 + loss6 + loss7 + loss8) / 4
-        loss_dda = (criterion_at(output9) + criterion_at(output10) + criterion_at(output11) + criterion_at(output12))/4
+        outputs = model(anchor_image, positive_image, negative_image, negative_image2)
 
-        loss = loss1  #+ 0.1 * loss_dda + 0.1 * loss_csa + 0.1 * loss_triplet
+        cls_base_anchor, cls_positive, cls_negative, cls_negative2, \
+            x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm = outputs
+        # 分类损失
+        loss_ce_base = criterion_cls(cls_base_anchor, label)
+        loss_ce_pos = criterion_cls(cls_positive, label)
+        loss_ce_neg1 = criterion_cls(cls_negative, neg_label)
+        loss_ce_neg2 = criterion_cls(cls_negative2, neg_label)
+
+        # 对比损失（坐标注意力增强后的特征）
+        loss_qcs = qcs_loss(x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm) / 2
+
+        # 总损失
+        # print(half_epoch, epoch)
+        if epoch < half_epoch:
+            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4
+        else :
+            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4 + loss_qcs * 1
 
         # measure accuracy and record loss
-        acc1, _ = accuracy(output1, label, topk=(1, 5))
+        acc1, _ = accuracy(cls_base_anchor, label, topk=(1, 5))
         losses.update(loss.item(), anchor_image.size(0))
         top1.update(acc1[0], anchor_image.size(0))
 
@@ -277,38 +287,34 @@ def train(train_loader, model, criterion_cls, criterion_at, triplet_loss_fn,opti
 
         '''----------------------  second_step  ----------------------'''
 
-        (output1, output2, output3, output4, output5, output6, output7, output8,
-         output9, output10, output11, output12, output13, output14, output15, output16) = model(anchor_image,
-                                                                                                positive_image,
-                                                                                                negative_image,
-                                                                                                negative_image2)
+        outputs = model(anchor_image, positive_image, negative_image, negative_image2)
 
-        loss1 = criterion_cls(output1, label)
-        loss2 = criterion_cls(output2, label)
-        loss3 = criterion_cls(output3, neg_label)
-        loss4 = criterion_cls(output4, neg_label)
-        loss5 = criterion_cls(output5, label)
-        loss6 = criterion_cls(output6, label)
-        loss7 = criterion_cls(output7, neg_label)
-        loss8 = criterion_cls(output8, neg_label)
-        loss_fn1 = triplet_loss_fn(output13, output14, output15)
-        loss_fn2 = triplet_loss_fn(output13, output14, output16)
-        loss_triplet = (loss_fn1 + loss_fn2) / 2
-        loss_csa = (loss5 + loss6 + loss7 + loss8) / 4
-        loss_dda = (criterion_at(output9) + criterion_at(output10) + criterion_at(output11) + criterion_at(
-            output12)) / 4
+        cls_base_anchor, cls_positive, cls_negative, cls_negative2, \
+            x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm = outputs
+        # 分类损失
+        loss_ce_base = criterion_cls(cls_base_anchor, label)
+        loss_ce_pos = criterion_cls(cls_positive, label)
+        loss_ce_neg1 = criterion_cls(cls_negative, neg_label)
+        loss_ce_neg2 = criterion_cls(cls_negative2, neg_label)
 
-        loss = loss1  #+ 0.1 * loss_dda + 0.1 * loss_csa + 0.1 * loss_triplet
+        # 对比损失（坐标注意力增强后的特征）
+        loss_qcs = qcs_loss(x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm) / 2
+
+        # 总损失
+        if i < half_epoch:
+            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4
+        else:
+            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4 + loss_qcs * 1
 
         # measure accuracy and record loss
-        acc1, _ = accuracy(output1, label, topk=(1, 5))
+        acc1, _ = accuracy(cls_base_anchor, label, topk=(1, 5))
         losses.update(loss.item(), anchor_image.size(0))
         top1.update(acc1[0], anchor_image.size(0))
         '----------loss-----------'
-        losses_1.update(loss1.item(), anchor_image.size(0))
-        losses_2.update(loss2.item(), anchor_image.size(0))
-        losses_3.update(loss5.item(), anchor_image.size(0))
-        losses_4.update(loss6.item(), anchor_image.size(0))
+        losses_1.update(loss_ce_base.item(), anchor_image.size(0))
+        losses_2.update(loss_qcs.item(), anchor_image.size(0))
+        losses_3.update(loss_ce_neg1.item(), anchor_image.size(0))
+        losses_4.update(loss_ce_neg2.item(), anchor_image.size(0))
 
         # compute gradient and do SGD step
         # optimizer.zero_grad()
@@ -344,7 +350,7 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
             images = images.cuda()
             target = target.cuda()
             output, head = model(images, None, None, None)
-            loss = criterion_cls(output, target) + 0.1 * criterion_at(head)
+            loss = criterion_cls(output, target)
 
             # measure accuracy and record loss
             acc, _ = accuracy(output, target, topk=(1, 5))
