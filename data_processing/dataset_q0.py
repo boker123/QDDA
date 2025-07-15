@@ -18,11 +18,11 @@ def config(dataset):
         cls_num = 7
 
     if dataset == 'AffectNet-7':
-        train_root = '{BASEPATH}/AffectNet/Manually_trainval_croped'
-        test_root = '{BASEPATH}/AffectNet/Manually_trainval_croped'
-        train_pd = pd.read_csv("{BASEPATH}/AffectNet/affectnet_training-cls7-v7.txt", sep=" ", header=None,
+        train_root = f'{BASEPATH}/AffectNet/Manually_trainval_croped'
+        test_root = f'{BASEPATH}/AffectNet/Manually_trainval_croped'
+        train_pd = pd.read_csv(f"{BASEPATH}/AffectNet/affectnet_training-cls7-v7.txt", sep=" ", header=None,
                                names=['ImageName', 'label'], engine='python')
-        test_pd = pd.read_csv("{BASEPATH}/AffectNet/affectnet_validation-cls7.txt", sep=" ", header=None,
+        test_pd = pd.read_csv(f"{BASEPATH}/AffectNet/affectnet_validation-cls7.txt", sep=" ", header=None,
                               names=['ImageName', 'label'], engine='python')
         cls_num = 7
 
@@ -36,11 +36,11 @@ def config(dataset):
         cls_num = 8
 
     if dataset == 'FERPlus':
-        train_root = '{BASEPATH}/FERPlus/img'
-        test_root = '{BASEPATH}/FERPlus/img'
-        train_pd = pd.read_csv("{BASEPATH}/FERPlus/ferplus_training.txt", sep=" ", header=None,
+        train_root = f'{BASEPATH}/datas/FERPlus/img'
+        test_root = f'{BASEPATH}/datas/FERPlus/img'
+        train_pd = pd.read_csv(f"{BASEPATH}/datas/FERPlus/ferplus_training.txt", sep=" ", header=None,
                                names=['ImageName', 'label'], engine='python')
-        test_pd = pd.read_csv("{BASEPATH}/FERPlus/ferplus_test.txt", sep=" ", header=None,
+        test_pd = pd.read_csv(f"{BASEPATH}/datas/FERPlus/ferplus_test.txt", sep=" ", header=None,
                               names=['ImageName', 'label'], engine='python')
         cls_num = 8
 

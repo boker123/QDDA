@@ -94,10 +94,7 @@ class QDDANet(nn.Module):
                                  weights_only=False, map_location=device)
 
         self.backbone = nn.Sequential(*list(mixed_feature.children())[:-4])
-        self.embedding = PositionalEmbedding(input_channels=512, embed_dim=786, H=7, W=7)
         self.cls_head = ClassifierHead(num_class=num_class, num_head=num_head)
-        self.inverse_embedding = InverseEmbedding(embed_dim=786, output_channels=512, H=7, W=7)
-        self.cross_similarity_attention = CrossAttention(embed_dim=embed_dim)
 
 
     def forward(self, x_anchor, x_positive, x_negative, x_negative2):

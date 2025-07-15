@@ -1,5 +1,11 @@
 import warnings
 from sklearn import metrics
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import matplotlib.pyplot as plt
 
 from models.QDDA import QDDANet
 from utils.AttentionLoss import AttentionLoss
@@ -59,14 +65,62 @@ args.best_checkpoint_path = args.best_checkpoint_path + time_str + 'model_best.p
 args.best_checkpoint_path = Path(args.best_checkpoint_path)
 
 
+def safe_load_checkpoint(checkpoint_path, model, optimizer=None):
+    """
+    Safely load a PyTorch checkpoint with better error handling
+    """
+    try:
+        # Try loading with weights_only=True first (safest)
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
+        print(f"Successfully loaded checkpoint with weights_only=True")
+        return checkpoint
+    except Exception as e1:
+        print(f"Failed to load with weights_only=True: {e1}")
+
+        try:
+            # Try loading with weights_only=False
+            checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+            print(f"Successfully loaded checkpoint with weights_only=False")
+            return checkpoint
+        except Exception as e2:
+            print(f"Failed to load with weights_only=False: {e2}")
+
+            try:
+                # Try loading with pickle_module override
+                import pickle
+                checkpoint = torch.load(checkpoint_path, map_location='cpu', pickle_module=pickle)
+                print(f"Successfully loaded checkpoint with pickle override")
+                return checkpoint
+            except Exception as e3:
+                print(f"Failed to load with pickle override: {e3}")
+
+                # Last resort: try to load only the state_dict
+                try:
+                    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                    if 'state_dict' in checkpoint:
+                        # Create a minimal checkpoint structure
+                        safe_checkpoint = {
+                            'state_dict': checkpoint['state_dict'],
+                            'epoch': checkpoint.get('epoch', 0),
+                            'best_acc': checkpoint.get('best_acc', 0.0),
+                        }
+                        print(f"Successfully loaded minimal checkpoint structure")
+                        return safe_checkpoint
+                    else:
+                        print("Checkpoint doesn't contain 'state_dict' key")
+                        return None
+                except Exception as e4:
+                    print(f"All loading methods failed: {e4}")
+                    return None
+
+
 def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     best_acc = 0
     print('Training time: ' + now.strftime("%m-%d %H:%M"))
 
     # create model
-    model = QDDANet(num_class=args.num_classes, num_head=2, embed_dim=786,pretrained=True)
-
+    model = QDDANet(num_class=args.num_classes, num_head=2, embed_dim=786, pretrained=True)
     model = torch.nn.DataParallel(model).cuda()
 
     criterion_cls = torch.nn.CrossEntropyLoss()
@@ -87,24 +141,54 @@ def main():
     recorder = RecorderMeter_loss(args.epochs)
     recorder_m = RecorderMeter_matrix(args.epochs)
 
+    # Handle resume checkpoint loading
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_acc = checkpoint['best_acc']
-            recorder = checkpoint['recorder']
-            recorder_m = checkpoint['recorder_m']
-            best_acc = best_acc.to()
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
+            checkpoint = safe_load_checkpoint(args.resume, model, optimizer)
+            if checkpoint is not None:
+                args.start_epoch = checkpoint.get('epoch', 0)
+                best_acc = checkpoint.get('best_acc', 0.0)
+
+                # Handle recorder loading safely
+                if 'recorder' in checkpoint:
+                    try:
+                        recorder = checkpoint['recorder']
+                    except:
+                        print("Could not load recorder, using fresh one")
+                        recorder = RecorderMeter_loss(args.epochs)
+
+                if 'recorder_m' in checkpoint:
+                    try:
+                        recorder_m = checkpoint['recorder_m']
+                    except:
+                        print("Could not load recorder_m, using fresh one")
+                        recorder_m = RecorderMeter_matrix(args.epochs)
+
+                # Convert best_acc to tensor if it's not already
+                if not torch.is_tensor(best_acc):
+                    best_acc = torch.tensor(best_acc)
+
+                # Load model state dict
+                if 'state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['state_dict'])
+
+                # Load optimizer state dict if available
+                if 'optimizer' in checkpoint and optimizer is not None:
+                    try:
+                        optimizer.load_state_dict(checkpoint['optimizer'])
+                    except:
+                        print("Could not load optimizer state, using fresh optimizer")
+
+                print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint.get('epoch', 0)))
+            else:
+                print("=> failed to load checkpoint '{}'".format(args.resume))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
+
     cudnn.benchmark = True
 
     # Data loading code
-
     train_root, test_root, train_pd, test_pd, cls_num = config(dataset=args.dataset)
 
     data_transforms = {
@@ -119,23 +203,6 @@ def main():
                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), ]),
     }
 
-    # data_transforms = {
-    #     'train': transforms.Compose([transforms.Resize((112, 112)),
-    #         transforms.RandomHorizontalFlip(),
-    #         transforms.RandomRotation(8),
-    #         transforms.RandomCrop((112, 112)),
-    #         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    #         transforms.RandomErasing(scale=(0.02, 0.1))]),
-    #
-    #     'test': transforms.Compose([transforms.Resize((112, 112)),
-    #         transforms.CenterCrop((112, 112)),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]),
-    # }
-
-
     train_dataset = Dataset(train_root, train_pd, train=True, transform=data_transforms['train'], num_positive=1,
                             num_negative=1)
     test_dataset = Dataset(test_root, test_pd, train=False, transform=data_transforms['test'])
@@ -145,36 +212,47 @@ def main():
     val_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers,
                             pin_memory=True)
 
+    # Handle evaluation checkpoint loading
     if args.evaluate is not None:
         if os.path.isfile(args.evaluate):
-            print("=> loading checkpoint '{}'".format(args.evaluate))
-            checkpoint = torch.load(args.evaluate)
-            best_acc = checkpoint['best_acc']
-            best_acc = best_acc.to()
-            print(f'best_acc:{best_acc}')
-            model.load_state_dict(checkpoint['state_dict'])
-            print("=> loaded checkpoint '{}' (epoch {})".format(args.evaluate, checkpoint['epoch']))
+            print("=> loading checkpoint for evaluation '{}'".format(args.evaluate))
+            checkpoint = safe_load_checkpoint(args.evaluate, model)
+            if checkpoint is not None:
+                best_acc = checkpoint.get('best_acc', 0.0)
+                if not torch.is_tensor(best_acc):
+                    best_acc = torch.tensor(best_acc)
+
+                print(f'best_acc: {best_acc}')
+
+                if 'state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['state_dict'])
+                    print("=> loaded checkpoint '{}' (epoch {})".format(args.evaluate, checkpoint.get('epoch', 0)))
+                else:
+                    print("=> no state_dict found in checkpoint")
+            else:
+                print("=> failed to load checkpoint '{}'".format(args.evaluate))
         else:
             print("=> no checkpoint found at '{}'".format(args.evaluate))
+
         validate(val_loader, model, criterion_cls, criterion_at, args)
         return
 
     matrix = None
 
     for epoch in range(args.start_epoch, args.epochs):
-
         current_learning_rate = optimizer.state_dict()['param_groups'][0]['lr']
         print('Current learning rate: ', current_learning_rate)
         log_dir = Path("log_raf_db")
-        log_dir.mkdir(parents=True, exist_ok=True)  # create the directory if it doesn't exist
+        log_dir.mkdir(parents=True, exist_ok=True)
         txt_name = log_dir / f"{time_str}log.txt"
         with open(txt_name, 'a') as f:
             f.write('Current learning rate: ' + str(current_learning_rate) + '\n')
 
         # train for one epoch
-        train_los_1, train_los_2, train_los_3, train_los_4 = train(train_loader, model, criterion_cls,optimizer, epoch, args)
+        train_los_1, train_los_2, train_los_3, train_los_4 = train(train_loader, model, criterion_cls, optimizer, epoch,
+                                                                   args)
 
-        # evaluate on a validation set
+        # evaluate on validation set
         val_acc, val_los, output, target, D = validate(val_loader, model, criterion_cls, criterion_at, args)
 
         scheduler.step()
@@ -198,7 +276,7 @@ def main():
         print('Current best matrix: ', matrix)
 
         log_dir = Path("log_raf_db")
-        log_dir.mkdir(parents=True, exist_ok=True)  # create the directory if it doesn't exist
+        log_dir.mkdir(parents=True, exist_ok=True)
 
         txt_name = log_dir / f"{time_str}log.txt"
         with open(txt_name, 'a') as f:
@@ -211,6 +289,7 @@ def main():
                          'recorder_m': recorder_m,
                          'recorder': recorder}, is_best, args)
 
+
 def qcs_loss(anchor_feat, positive_feat, negative1_feat, negative2_feat, margin=0.2):
     cos = torch.nn.CosineSimilarity(dim=-1)
     pos_sim = cos(anchor_feat, positive_feat)
@@ -221,7 +300,8 @@ def qcs_loss(anchor_feat, positive_feat, negative1_feat, negative2_feat, margin=
     loss2 = F.relu(neg_sim2 - pos_sim + margin)
     return (loss1 + loss2).mean()
 
-def train(train_loader, model, criterion_cls,optimizer, epoch, args):
+
+def train(train_loader, model, criterion_cls, optimizer, epoch, args):
     losses = AverageMeter('Loss', ':.5f')
     top1 = AverageMeter('Accuracy', ':6.3f')
     losses_1 = AverageMeter('Loss_1', ':.5f')
@@ -238,9 +318,7 @@ def train(train_loader, model, criterion_cls,optimizer, epoch, args):
     model.train()
 
     for i, data in enumerate(train_loader):
-
         anchor_image, positive_image, negative_image, negative_image2, label, neg_label = data
-        # print(image.shape)
         anchor_image = anchor_image.cuda()
         positive_image = positive_image.cuda()
         negative_image = negative_image.cuda()
@@ -254,54 +332,18 @@ def train(train_loader, model, criterion_cls,optimizer, epoch, args):
 
         cls_base_anchor, cls_positive, cls_negative, cls_negative2, \
             x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm = outputs
-        # 分类损失
+
+        # Classification losses
         loss_ce_base = criterion_cls(cls_base_anchor, label)
         loss_ce_pos = criterion_cls(cls_positive, label)
         loss_ce_neg1 = criterion_cls(cls_negative, neg_label)
         loss_ce_neg2 = criterion_cls(cls_negative2, neg_label)
 
-        # 对比损失（坐标注意力增强后的特征）
+        # Contrastive loss
         loss_qcs = qcs_loss(x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm) / 2
 
-        # 总损失
-        # print(half_epoch, epoch)
+        # Total loss
         if epoch < half_epoch:
-            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4
-        else :
-            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4 + loss_qcs * 1
-
-        # measure accuracy and record loss
-        acc1, _ = accuracy(cls_base_anchor, label, topk=(1, 5))
-        losses.update(loss.item(), anchor_image.size(0))
-        top1.update(acc1[0], anchor_image.size(0))
-
-        # compute gradient and do SGD step
-        # optimizer.zero_grad()
-        loss.backward()
-
-        # for name, param in model.named_parameters():
-        #    if (name == "module.cross_attention_3.proj.weight"):
-        #        print(f"Layer: {name}, Grad:{param.grad}")
-
-        optimizer.first_step(zero_grad=True)
-
-        '''----------------------  second_step  ----------------------'''
-
-        outputs = model(anchor_image, positive_image, negative_image, negative_image2)
-
-        cls_base_anchor, cls_positive, cls_negative, cls_negative2, \
-            x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm = outputs
-        # 分类损失
-        loss_ce_base = criterion_cls(cls_base_anchor, label)
-        loss_ce_pos = criterion_cls(cls_positive, label)
-        loss_ce_neg1 = criterion_cls(cls_negative, neg_label)
-        loss_ce_neg2 = criterion_cls(cls_negative2, neg_label)
-
-        # 对比损失（坐标注意力增强后的特征）
-        loss_qcs = qcs_loss(x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm) / 2
-
-        # 总损失
-        if i < half_epoch:
             loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4
         else:
             loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4 + loss_qcs * 1
@@ -310,16 +352,43 @@ def train(train_loader, model, criterion_cls,optimizer, epoch, args):
         acc1, _ = accuracy(cls_base_anchor, label, topk=(1, 5))
         losses.update(loss.item(), anchor_image.size(0))
         top1.update(acc1[0], anchor_image.size(0))
-        '----------loss-----------'
+
+        loss.backward()
+        optimizer.first_step(zero_grad=True)
+
+        '''----------------------  second_step  ----------------------'''
+        outputs = model(anchor_image, positive_image, negative_image, negative_image2)
+
+        cls_base_anchor, cls_positive, cls_negative, cls_negative2, \
+            x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm = outputs
+
+        # Classification losses
+        loss_ce_base = criterion_cls(cls_base_anchor, label)
+        loss_ce_pos = criterion_cls(cls_positive, label)
+        loss_ce_neg1 = criterion_cls(cls_negative, neg_label)
+        loss_ce_neg2 = criterion_cls(cls_negative2, neg_label)
+
+        # Contrastive loss
+        loss_qcs = qcs_loss(x_an_fm, x_po_fm, x_ne_fm, x_ne2_fm) / 2
+
+        # Total loss
+        if epoch < half_epoch:  # Fixed: should be epoch, not i
+            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4
+        else:
+            loss = (loss_ce_base + loss_ce_pos + loss_ce_neg1 + loss_ce_neg2) / 4 + loss_qcs * 1
+
+        # measure accuracy and record loss
+        acc1, _ = accuracy(cls_base_anchor, label, topk=(1, 5))
+        losses.update(loss.item(), anchor_image.size(0))
+        top1.update(acc1[0], anchor_image.size(0))
+
+        # Record individual losses
         losses_1.update(loss_ce_base.item(), anchor_image.size(0))
         losses_2.update(loss_qcs.item(), anchor_image.size(0))
         losses_3.update(loss_ce_neg1.item(), anchor_image.size(0))
         losses_4.update(loss_ce_neg2.item(), anchor_image.size(0))
 
-        # compute gradient and do SGD step
-        # optimizer.zero_grad()
         loss.backward()
-
         optimizer.second_step(zero_grad=True)
 
         # print loss and accuracy
@@ -345,6 +414,7 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
          [0, 0, 0, 0, 0, 0, 0],
          [0, 0, 0, 0, 0, 0, 0],
          [0, 0, 0, 0, 0, 0, 0]]
+
     with torch.no_grad():
         for i, (images, target) in enumerate(val_loader):
             images = images.cuda()
@@ -358,10 +428,8 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
             top1.update(acc[0], images.size(0))
 
             topk = (1,)
-            # """Computes the accuracy over the k top predictions for the specified values of k"""
             with torch.no_grad():
                 maxk = max(topk)
-                # batch_size = target.size(0)
                 _, pred = output.topk(maxk, 1, True, True)
                 pred = pred.t()
 
@@ -385,6 +453,7 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
         print(' **** Accuracy {top1.avg:.3f} *** '.format(top1=top1))
         with open('./log_raf_db/' + time_str + 'log.txt', 'a') as f:
             f.write(' * Accuracy {top1.avg:.3f}'.format(top1=top1) + '\n')
+
     print(D)
     return top1.avg, losses.avg, output, target, D
 
@@ -392,7 +461,6 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
 def save_checkpoint(state, is_best, args):
     torch.save(state, args.checkpoint_path)
     if is_best:
-        # best_state = state.pop('optimizer')
         torch.save(state, args.best_checkpoint_path)
 
 
@@ -450,8 +518,6 @@ def accuracy(output, target, topk=(1,)):
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
-        # print("预测:", pred[:10])
-        # print("标签:", target[:10])
         res = []
         for k in topk:
             correct_k = correct[:k].contiguous().view(-1).float().sum(0, keepdim=True)
@@ -468,8 +534,8 @@ class RecorderMeter_matrix(object):
     def reset(self, total_epoch):
         self.total_epoch = total_epoch
         self.current_epoch = 0
-        self.epoch_losses = np.zeros((self.total_epoch, 2), dtype=np.float32)  # [epoch, train/val]
-        self.epoch_accuracy = np.zeros((self.total_epoch, 2), dtype=np.float32)  # [epoch, train/val]
+        self.epoch_losses = np.zeros((self.total_epoch, 2), dtype=np.float32)
+        self.epoch_accuracy = np.zeros((self.total_epoch, 2), dtype=np.float32)
 
     def update(self, output, target):
         self.y_pred = output
@@ -491,7 +557,6 @@ class RecorderMeter_matrix(object):
         ax_raf.set_ylabel('True', fontsize=10)
         ax_raf.set_title('RAF-DB', fontsize=12)
         fig_raf.savefig('./log_raf_db/' + time_str + '-matrix.png', dpi=300)
-
         print('Saved matrix')
 
     def matrix(self):
@@ -500,7 +565,6 @@ class RecorderMeter_matrix(object):
         im_re_label = np.array(target)
         im_pre_label = np.array(output)
         y_ture = im_re_label.flatten()
-        # im_re_label.transpose()
         y_pred = im_pre_label.flatten()
         im_pre_label.transpose()
 
@@ -514,17 +578,13 @@ class RecorderMeter_loss(object):
     def reset(self, total_epoch):
         self.total_epoch = total_epoch
         self.current_epoch = 0
-        self.epoch_losses = np.zeros((self.total_epoch, 4), dtype=np.float32)  # [epoch, train/val]
-        # self.epoch_accuracy = np.zeros((self.total_epoch, 4), dtype=np.float32)  # [epoch, train/val]
+        self.epoch_losses = np.zeros((self.total_epoch, 4), dtype=np.float32)
 
     def update(self, idx, train_loss_1, train_loss_2, train_loss_3, train_loss_4):
         self.epoch_losses[idx, 0] = train_loss_1
         self.epoch_losses[idx, 1] = train_loss_2
         self.epoch_losses[idx, 2] = train_loss_3
         self.epoch_losses[idx, 3] = train_loss_4
-
-        # self.epoch_accuracy[idx, 0] = train_acc
-        # self.epoch_accuracy[idx, 1] = val_acc
         self.current_epoch = idx + 1
 
     def plot_curve(self, save_path):
@@ -535,7 +595,7 @@ class RecorderMeter_loss(object):
         figsize = width / float(dpi), height / float(dpi)
 
         fig = plt.figure(figsize=figsize)
-        x_axis = np.array([i for i in range(self.total_epoch)])  # epochs
+        x_axis = np.array([i for i in range(self.total_epoch)])
         y_axis = np.zeros(self.total_epoch)
 
         plt.xlim(0, self.total_epoch)
