@@ -384,7 +384,7 @@ def train(train_loader, model, criterion_cls, optimizer, epoch, args):
 
         # Record individual losses
         losses_1.update(loss_ce_base.item(), anchor_image.size(0))
-        losses_2.update(loss_qcs.item(), anchor_image.size(0))
+        losses_2.update(loss_ce_pos.item(), anchor_image.size(0))
         losses_3.update(loss_ce_neg1.item(), anchor_image.size(0))
         losses_4.update(loss_ce_neg2.item(), anchor_image.size(0))
 
@@ -618,11 +618,11 @@ class RecorderMeter_loss(object):
         plt.legend(loc=1, fontsize=legend_fontsize)
 
         y_axis[:] = self.epoch_losses[:, 2]
-        plt.plot(x_axis, y_axis, color='b', linestyle='-', label='loss_cross_a', lw=3)
+        plt.plot(x_axis, y_axis, color='b', linestyle='-', label='loss_base_negative', lw=3)
         plt.legend(loc=1, fontsize=legend_fontsize)
 
         y_axis[:] = self.epoch_losses[:, 3]
-        plt.plot(x_axis, y_axis, color='y', linestyle='-', label='loss_cross_p', lw=3)
+        plt.plot(x_axis, y_axis, color='y', linestyle='-', label='loss_base_negative2', lw=3)
         plt.legend(loc=1, fontsize=legend_fontsize)
 
         if save_path is not None:
