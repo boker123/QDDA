@@ -575,7 +575,7 @@ class RecorderMeter_matrix(object):
             ax_raf.set_xlabel('Predicted', fontsize=10)
             ax_raf.set_ylabel('True', fontsize=10)
             ax_raf.set_title('FERPlus', fontsize=12)
-            fig_raf.savefig('./log_ferplus/' + time_str + '-matrix.png', dpi=300)
+            fig_raf.savefig('./log_raf_db/' + time_str + '-matrix.png', dpi=300)
         elif self.dataset == 'RAF-DB':
             x_labels_raf = ['Surprise', 'Fear', 'Disgust', 'Happy', 'Sad', 'Anger', 'Neutral']
             y_labels_raf = ['Surprise', 'Fear', 'Disgust', 'Happy', 'Sad', 'Anger', 'Neutral']
