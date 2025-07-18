@@ -139,7 +139,7 @@ def main():
     optimizer = SAM(model.parameters(), base_optimizer, lr=args.lr, rho=0.05, adaptive=False, )
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
     recorder = RecorderMeter_loss(args.epochs)
-    recorder_m = RecorderMeter_matrix(args.epochs)
+    recorder_m = RecorderMeter_matrix(args.epochs, args.dataset)
 
     # Handle resume checkpoint loading
     if args.resume:
@@ -163,7 +163,7 @@ def main():
                         recorder_m = checkpoint['recorder_m']
                     except:
                         print("Could not load recorder_m, using fresh one")
-                        recorder_m = RecorderMeter_matrix(args.epochs)
+                        recorder_m = RecorderMeter_matrix(args.epochs,  args.dataset)
 
                 # Convert best_acc to tensor if it's not already
                 if not torch.is_tensor(best_acc):
@@ -181,6 +181,10 @@ def main():
                         print("Could not load optimizer state, using fresh optimizer")
 
                 print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint.get('epoch', 0)))
+                curve_name = time_str + 'cnn.png'
+                print(recorder.epoch_losses)
+                recorder.plot_curve(os.path.join('./log_raf_db/', curve_name))
+                return
             else:
                 print("=> failed to load checkpoint '{}'".format(args.resume))
         else:
@@ -407,13 +411,23 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
 
     # switch to evaluate mode
     model.eval()
-    D = [[0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0],
-         [0, 0, 0, 0, 0, 0, 0]]
+    if args.num_classes == 7:
+        D = [[0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0]]
+    elif args.num_classes == 8:
+        D = [[0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0]]
 
     with torch.no_grad():
         for i, (images, target) in enumerate(val_loader):
@@ -444,7 +458,10 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
             y_pred = im_pre_label.flatten()
             im_pre_label.transpose()
 
-            C = metrics.confusion_matrix(y_ture, y_pred, labels=[0, 1, 2, 3, 4, 5, 6])
+            if args.num_classes == 7:
+                C = metrics.confusion_matrix(y_ture, y_pred, labels=[0, 1, 2, 3, 4, 5, 6])
+            elif args.num_classes == 8:
+                C = metrics.confusion_matrix(y_ture, y_pred, labels=[0, 1, 2, 3, 4, 5, 6, 7])
             D += C
 
             if i % args.print_freq == 0:
@@ -528,8 +545,9 @@ def accuracy(output, target, topk=(1,)):
 class RecorderMeter_matrix(object):
     """Computes and stores the minimum loss value and its epoch index"""
 
-    def __init__(self, total_epoch):
+    def __init__(self, total_epoch, dataset):
         self.reset(total_epoch)
+        self.dataset = dataset
 
     def reset(self, total_epoch):
         self.total_epoch = total_epoch
@@ -549,15 +567,25 @@ class RecorderMeter_matrix(object):
         sns.heatmap(D_raf_norm, cmap='Blues', square=True, annot=D_raf_text, fmt='', cbar=False, ax=ax_raf,
                     annot_kws={'size': 7, 'ha': 'center', 'va': 'center'})
 
-        x_labels_raf = ['Surprise', 'Fear', 'Disgust', 'Happy', 'Sad', 'Anger', 'Neutral']
-        y_labels_raf = ['Surprise', 'Fear', 'Disgust', 'Happy', 'Sad', 'Anger', 'Neutral']
-        ax_raf.set_xticklabels(x_labels_raf, fontsize=7)
-        ax_raf.set_yticklabels(y_labels_raf, fontsize=7)
-        ax_raf.set_xlabel('Predicted', fontsize=10)
-        ax_raf.set_ylabel('True', fontsize=10)
-        ax_raf.set_title('RAF-DB', fontsize=12)
-        fig_raf.savefig('./log_raf_db/' + time_str + '-matrix.png', dpi=300)
-        print('Saved matrix')
+        if self.dataset == 'FERPlus':
+            x_labels_ferplus = ['Neutral', 'Happy', 'Surprise', 'Sad', 'Anger', 'Disgust', 'Fear', 'Contempt']
+            y_labels_ferplus = ['Neutral', 'Happy', 'Surprise', 'Sad', 'Anger', 'Disgust', 'Fear', 'Contempt']
+            ax_raf.set_xticklabels(x_labels_ferplus, fontsize=7)
+            ax_raf.set_yticklabels(y_labels_ferplus, fontsize=7)
+            ax_raf.set_xlabel('Predicted', fontsize=10)
+            ax_raf.set_ylabel('True', fontsize=10)
+            ax_raf.set_title('FERPlus', fontsize=12)
+            fig_raf.savefig('./log_ferplus/' + time_str + '-matrix.png', dpi=300)
+        elif self.dataset == 'RAF-DB':
+            x_labels_raf = ['Surprise', 'Fear', 'Disgust', 'Happy', 'Sad', 'Anger', 'Neutral']
+            y_labels_raf = ['Surprise', 'Fear', 'Disgust', 'Happy', 'Sad', 'Anger', 'Neutral']
+            ax_raf.set_xticklabels(x_labels_raf, fontsize=7)
+            ax_raf.set_yticklabels(y_labels_raf, fontsize=7)
+            ax_raf.set_xlabel('Predicted', fontsize=10)
+            ax_raf.set_ylabel('True', fontsize=10)
+            ax_raf.set_title('RAF-DB', fontsize=12)
+            fig_raf.savefig('./log_raf_db/' + time_str + '-matrix.png', dpi=300)
+            print('Saved matrix')
 
     def matrix(self):
         target = self.y_true
@@ -599,11 +627,14 @@ class RecorderMeter_loss(object):
         y_axis = np.zeros(self.total_epoch)
 
         plt.xlim(0, self.total_epoch)
-        plt.ylim(0, 0.3)
+        min_loss = np.min(self.epoch_losses)
+        max_loss = np.max(self.epoch_losses)
+        plt.ylim(min_loss * 0.9, max_loss * 1.1)
         interval_y = 0.015
         interval_x = 10
         plt.xticks(np.arange(0, self.total_epoch + interval_x, interval_x), fontsize=15)
-        plt.yticks(np.arange(0, 0.3 + interval_y, interval_y), fontsize=15)
+        interval_y = (max_loss - min_loss) / 8
+        plt.yticks(np.arange(min_loss, max_loss + interval_y, interval_y), fontsize=15)
         plt.grid()
         plt.title(title, fontsize=40)
         plt.xlabel('epoch', fontsize=35)
