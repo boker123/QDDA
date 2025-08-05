@@ -286,12 +286,19 @@ def main():
         with open(txt_name, 'a') as f:
             f.write('Current best accuracy: ' + str(best_acc.item()) + '\n')
 
-        save_checkpoint({'epoch': epoch + 1,
-                         'state_dict': model.state_dict(),
-                         'best_acc': best_acc,
-                         'optimizer': optimizer.state_dict(),
-                         'recorder_m': recorder_m,
-                         'recorder': recorder}, is_best, args)
+        save_checkpoint(
+            {
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_acc': best_acc,
+                'optimizer': optimizer.state_dict(),
+                'recorder_m': recorder_m,
+                'recorder': recorder
+            },
+            is_best,
+            args,
+            model
+        )
 
 
 def qcs_loss(anchor_feat, positive_feat, negative1_feat, negative2_feat, margin=0.2):
@@ -475,10 +482,17 @@ def validate(val_loader, model, criterion_cls, criterion_at, args):
     return top1.avg, losses.avg, output, target, D
 
 
-def save_checkpoint(state, is_best, args):
+def save_checkpoint(state, is_best, args, model=None):
     torch.save(state, args.checkpoint_path)
     if is_best:
         torch.save(state, args.best_checkpoint_path)
+    net = model.module if isinstance(model, torch.nn.DataParallel) else model
+    # build a filename alongside your existing checkpoints, e.g.:
+    param_path = args.checkpoint_path.with_name(
+        args.checkpoint_path.stem + '_only_params.pth'
+    )
+    torch.save(net.state_dict(), param_path)
+    print(f"Saved model parameters to {param_path}")
 
 
 class AverageMeter(object):

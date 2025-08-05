@@ -6,64 +6,6 @@ from models.CrossSimilarityAttention import *
 from networks import MixedFeatureNet
 
 
-class PositionalEmbedding(nn.Module):
-    def __init__(self, input_channels, embed_dim, H, W, use_projection=True):
-        """
-        Args:
-            input_channels: 输入特征的通道数，如512
-            embed_dim: 输出嵌入维度
-            H, W: 输入特征图的空间尺寸（如7x7）
-            use_projection: 是否加入1x1卷积投影通道
-        """
-        super(PositionalEmbedding, self).__init__()
-        self.H = H
-        self.W = W
-        self.N = H * W
-        self.embed_dim = embed_dim
-
-        # 可选：通过 1x1 conv 将 C → embed_dim（如果 C != embed_dim）
-        self.proj = nn.Conv2d(input_channels, embed_dim, kernel_size=1) if use_projection else nn.Identity()
-
-        # 位置编码，大小为 [1, N, embed_dim]
-        self.pos_embedding = nn.Parameter(torch.zeros(1, self.N, embed_dim))
-        nn.init.trunc_normal_(self.pos_embedding, std=0.02)  # 初始化为正态分布
-
-    def forward(self, x):
-        """
-        Args:
-            x: 输入张量 [B, C, H, W]
-        Returns:
-            带位置编码的序列表示 [B, N, embed_dim]
-        """
-        B = x.size(0)
-        x = self.proj(x)              # [B, C, H, W] → [B, embed_dim, H, W]
-        x = x.view(B, self.embed_dim, self.N)  # → [B, embed_dim, N]
-        x = x.permute(0, 2, 1)        # → [B, N, embed_dim]
-        x = x + self.pos_embedding    # 加入可学习的位置编码
-        return x
-
-
-class InverseEmbedding(nn.Module):
-    def __init__(self, embed_dim=786, output_channels=512, H=7, W=7):
-        super(InverseEmbedding, self).__init__()
-        self.H = H
-        self.W = W
-        self.output_channels = output_channels
-        self.linear = nn.Linear(embed_dim, output_channels)
-
-    def forward(self, x):
-        """
-        Args:
-            x: [B, N, embed_dim] → 例如 [B, 49, 786]
-        Returns:
-            [B, C, H, W] → 例如 [B, 512, 7, 7]
-        """
-        B, N, E = x.shape
-        x = self.linear(x)           # [B, 49, 512]
-        x = x.permute(0, 2, 1)       # [B, 512, 49]
-        x = x.view(B, self.output_channels, self.H, self.W)  # [B, 512, 7, 7]
-        return x
-
 class QDDANet(nn.Module):
     def __init__(self, num_class=7, num_head=2, embed_dim=786,pretrained=True):
         super(QDDANet, self).__init__()
