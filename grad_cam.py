@@ -1,3 +1,8 @@
+from PIL import Image
+import torchvision.transforms as transforms
+import cv2
+from models.QDDA import QDDANet
+from run_raf_DDA import *
 import torch
 import torch.nn.functional as F
 import cv2
@@ -6,8 +11,6 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import torchvision.transforms as transforms
 
-from models.QDDA import QDDANet
-from run_raf_DDA import *
 
 
 class QDDANetGradCAM:
@@ -247,7 +250,7 @@ class QDDANetGradCAM:
         """
         # 图像预处理
         transform = transforms.Compose([
-            transforms.Resize((224, 224)),  # 根据您的模型输入尺寸调整
+            transforms.Resize((112, 112)),  # 根据您的模型输入尺寸调整
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
@@ -376,14 +379,14 @@ def demo_qddanet_gradcam():
     """
     # 1. 加载训练好的模型
     model = QDDANet(num_class=7, pretrained=True)
-    model.load_state_dict(torch.load('C:\\Users\\boker\\PycharmProjects\\QDDA\\checkpoint_raf_db\\[07-14]-[08-14]-model_best.pth'))
+    model.load_state_dict(torch.load('C:\\Users\\boker\\PycharmProjects\\QDDA\\checkpoint_raf_db\\[08-05]-[04-22]-checkout_only_params.pth'))
     model.eval()
 
     # 2. 创建Grad-CAM分析器
     gradcam = QDDANetGradCAM(model)
 
     # 3. 分析单个图像（推理模式）
-    cam, result, pred_class, confidence = gradcam.analyze_sample('C:\\Users\\boker\\PycharmProjects\\QDDA\\datas\\RAF-DB\\basic\\test_0003_aligned.jpg')
+    cam, result, pred_class, confidence = gradcam.analyze_sample('C:\\Users\\boker\\PycharmProjects\\QDDA\\datas\\RAF-DB\\basic\\test_0007_aligned.jpg', save_path='gradcam_result.png')
 
     # 4. 分析四元组输入（如果有完整的四元组数据）
     # gradcam.compare_quadruplet_inputs(x_anchor, x_positive, x_negative, x_negative2)
@@ -391,5 +394,272 @@ def demo_qddanet_gradcam():
     print("请按照注释中的步骤使用QDDANet Grad-CAM分析器")
 
 
+# 方案1: 使用现有的analyze_sample方法（已包含可视化）
+def visualize_with_analyze_sample(gradcam, image_path, class_idx=None, save_path=None):
+    """
+    使用analyze_sample方法进行可视化（推荐方案）
+    这个方法会自动显示三个子图：原图、热力图、叠加图
+    """
+    cam, result_image, pred_class, confidence = gradcam.analyze_sample(
+        input_image_path=image_path,
+        class_idx=class_idx,
+        save_path=save_path
+    )
+
+    return cam, result_image, pred_class, confidence
+
+
+# 方案2: 手动控制可视化过程
+def manual_visualization(gradcam, image_path, class_idx=None, save_path=None):
+    """
+    手动控制可视化过程，可以自定义显示内容
+    """
+    # 图像预处理
+    transform = transforms.Compose([
+        transforms.Resize((112, 112)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    # 加载和预处理图像
+    image = Image.open(image_path).convert('RGB')
+    input_tensor = transform(image).unsqueeze(0)
+
+    # 生成Grad-CAM
+    cam, prediction = gradcam.generate_cam_single(input_tensor, class_idx)
+
+    # 可视化结果
+    result_image = gradcam.visualize_cam(image, cam)
+
+    # 自定义显示
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+    # 原始图像
+    axes[0, 0].imshow(image)
+    axes[0, 0].set_title('Original Image', fontsize=14)
+    axes[0, 0].axis('off')
+
+    # 热力图
+    axes[0, 1].imshow(cam, cmap='jet')
+    axes[0, 1].set_title('Grad-CAM Heatmap', fontsize=14)
+    axes[0, 1].axis('off')
+
+    # 叠加图
+    axes[1, 0].imshow(result_image)
+    axes[1, 0].set_title('Grad-CAM Overlay', fontsize=14)
+    axes[1, 0].axis('off')
+
+    # 预测结果柱状图
+    predicted_class = np.argmax(prediction[0])
+    confidence = np.max(prediction[0])
+
+    # 显示前5个最高概率的类别
+    top5_indices = np.argsort(prediction[0])[-5:][::-1]
+    top5_probs = prediction[0][top5_indices]
+
+    axes[1, 1].bar(range(5), top5_probs)
+    axes[1, 1].set_title('Top 5 Predictions', fontsize=14)
+    axes[1, 1].set_xlabel('Class Index')
+    axes[1, 1].set_ylabel('Probability')
+    axes[1, 1].set_xticks(range(5))
+    axes[1, 1].set_xticklabels([str(idx) for idx in top5_indices])
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.show()
+
+    print(f"Predicted class: {predicted_class}, Confidence: {confidence:.4f}")
+
+    return cam, result_image, predicted_class, confidence
+
+
+# 方案3: 交互式可视化
+def interactive_visualization(gradcam, image_path, save_path=None):
+    """
+    交互式可视化，可以选择不同的类别进行分析
+    """
+    # 预处理
+    transform = transforms.Compose([
+        transforms.Resize((112, 112)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    image = Image.open(image_path).convert('RGB')
+    input_tensor = transform(image).unsqueeze(0)
+
+    # 获取所有类别的预测
+    cam_default, prediction = gradcam.generate_cam_single(input_tensor, None)
+
+    # 创建子图
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+
+    # 显示原始图像
+    axes[0, 0].imshow(image)
+    axes[0, 0].set_title('Original Image', fontsize=12)
+    axes[0, 0].axis('off')
+
+    # 显示默认预测的CAM
+    result_default = gradcam.visualize_cam(image, cam_default)
+    axes[0, 1].imshow(result_default)
+    pred_class = np.argmax(prediction[0])
+    axes[0, 1].set_title(f'Predicted Class {pred_class}', fontsize=12)
+    axes[0, 1].axis('off')
+
+    # 显示前6个类别的CAM
+    top6_classes = np.argsort(prediction[0])[-6:][::-1]
+
+    for i, class_idx in enumerate(top6_classes):
+        if i >= 6:
+            break
+
+        cam_class, _ = gradcam.generate_cam_single(input_tensor, class_idx)
+        result_class = gradcam.visualize_cam(image, cam_class)
+
+        row = (i + 2) // 4
+        col = (i + 2) % 4
+
+        if row < 2 and col < 4:
+            axes[row, col].imshow(result_class)
+            prob = prediction[0][class_idx]
+            axes[row, col].set_title(f'Class {class_idx}: {prob:.3f}', fontsize=12)
+            axes[row, col].axis('off')
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.show()
+
+    return top6_classes, prediction
+
+
+# 方案4: 单独显示热力图
+def show_heatmap_only(gradcam, image_path, class_idx=None, colormap='jet'):
+    """
+    只显示热力图，不叠加原图
+    """
+    transform = transforms.Compose([
+        transforms.Resize((112, 112)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    image = Image.open(image_path).convert('RGB')
+    input_tensor = transform(image).unsqueeze(0)
+
+    cam, prediction = gradcam.generate_cam_single(input_tensor, class_idx)
+
+    plt.figure(figsize=(8, 6))
+    plt.imshow(cam, cmap=colormap)
+    plt.colorbar()
+    plt.title('Grad-CAM Heatmap')
+    plt.axis('off')
+    plt.show()
+
+    return cam
+
+
+# 方案5: 保存结果而不显示
+def save_visualization(gradcam, image_path, save_dir, class_idx=None):
+    """
+    保存可视化结果到文件，不在屏幕上显示
+    """
+    import os
+
+    transform = transforms.Compose([
+        transforms.Resize((112, 112)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    image = Image.open(image_path).convert('RGB')
+    input_tensor = transform(image).unsqueeze(0)
+
+    cam, prediction = gradcam.generate_cam_single(input_tensor, class_idx)
+    result_image = gradcam.visualize_cam(image, cam)
+
+    # 创建保存目录
+    os.makedirs(save_dir, exist_ok=True)
+
+    # 保存原图
+    image.save(os.path.join(save_dir, 'original.png'))
+
+    # 保存热力图
+    plt.figure(figsize=(8, 6))
+    plt.imshow(cam, cmap='jet')
+    plt.colorbar()
+    plt.axis('off')
+    plt.savefig(os.path.join(save_dir, 'heatmap.png'), bbox_inches='tight', dpi=300)
+    plt.close()
+
+    # 保存叠加图
+    Image.fromarray(result_image).save(os.path.join(save_dir, 'overlay.png'))
+
+    # 保存预测结果
+    pred_class = np.argmax(prediction[0])
+    confidence = np.max(prediction[0])
+
+    with open(os.path.join(save_dir, 'prediction.txt'), 'w') as f:
+        f.write(f"Predicted class: {pred_class}\n")
+        f.write(f"Confidence: {confidence:.4f}\n")
+        f.write(f"All probabilities: {prediction[0]}\n")
+
+    return cam, result_image, pred_class, confidence
+
+
+# 使用示例
+def main():
+    """
+    使用示例
+    """
+    # 假设你已经创建了gradcam对象
+    model = QDDANet(num_class=7, pretrained=True)
+    model.load_state_dict(torch.load('C:\\Users\\boker\\PycharmProjects\\QDDA\\checkpoint_raf_db\\[08-05]-[04-22]-checkout_only_params.pth'))
+    model.eval()
+
+    gradcam = QDDANetGradCAM(model)
+
+    image_path = 'C:\\Users\\boker\\PycharmProjects\\QDDA\\datas\\RAF-DB\\basic\\test_0003_aligned.jpg'
+
+    print("选择可视化方案:")
+    print("1. 使用analyze_sample方法（推荐）")
+    print("2. 手动控制可视化")
+    print("3. 交互式可视化")
+    print("4. 只显示热力图")
+    print("5. 保存结果到文件")
+
+    # 方案1: 最简单的使用方法
+    # cam, result, pred_class, confidence = visualize_with_analyze_sample(
+    #     gradcam, image_path, save_path='gradcam_result.png'
+    # )
+
+    # 方案2: 自定义显示
+    cam, result, pred_class, confidence = manual_visualization(
+        gradcam, image_path, save_path='manual_result.png'
+    )
+
+    # 方案3: 交互式
+    # top_classes, prediction = interactive_visualization(
+    #     gradcam, image_path, save_path='interactive_result.png'
+    # )
+
+    # 方案4: 只看热力图
+    # cam = show_heatmap_only(gradcam, image_path)
+
+    # 方案5: 保存到文件
+    # cam, result, pred_class, confidence = save_visualization(
+    #     gradcam, image_path, 'output_dir'
+    # )
+
+
 if __name__ == "__main__":
-    demo_qddanet_gradcam()
+    main()
